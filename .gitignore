@@ -2,3 +2,4 @@ dist/
 builder/.venv-static/
 .DS_Store
 .publish.lock/
+dist-report.json
