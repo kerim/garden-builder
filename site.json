@@ -1,0 +1,13 @@
+{
+  "title": "Kerim's Digital Garden",
+  "home_page": "Kerim's Digital Garden",
+  "description": "Kerim's Digital Garden",
+  "url": "https://example.com",
+  "language": "en",
+  "navigation": ["Education", "Taiwan", "India", "Health", "Technology", "Everything Else"],
+  "url_style": "sections",
+  "embed_titles": false,
+  "embed_style": "inline",
+  "author": "P. Kerim Friedman",
+  "license": "CC BY 4.0"
+}
