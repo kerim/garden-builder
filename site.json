@@ -5,6 +5,7 @@
   "url": "https://example.com",
   "language": "en",
   "navigation": ["Education", "Taiwan", "India", "Health", "Technology", "Everything Else"],
+  "navigation_page": "Topics",
   "url_style": "sections",
   "embed_titles": false,
   "embed_style": "inline",
