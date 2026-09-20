@@ -1,122 +1,219 @@
 # garden-builder
 
-This repository is what actually gets published as Kerim's digital garden
-website. It is small on purpose: it holds the exported content, the site
-config, and a pointer to the builder tooling — not the tooling itself.
+This is the operating manual for publishing Kerim's Digital Garden. It covers
+the everyday routine, first-time setup, how to change the site's look and
+behavior, hosting, local preview, and troubleshooting.
 
-- `export/` — the raw public export from Logseq (`index.html`, `404.html`,
-  `assets/`, `static/`). This gets replaced wholesale every time a new export
-  is made.
-- `site.json` — the site's title, navigation, and rendering options (URL
-  style, embed style, license, etc). Edit this by hand when the site's
-  structure or metadata needs to change.
-- `builder/` — a git submodule tracking the `kerim-theme` branch of
-  [kerim/garden](https://github.com/kerim/garden.git), the actual static-site
-  generator. This repo never edits the builder directly; changes to the
-  generator happen in that other repository and get pulled in here as a
-  submodule update.
-- `build.sh` — builds `dist/` locally from `export/` and `site.json`. This is
-  also what Cloudflare Pages runs.
-- `publish.sh` — the manual publish routine: build locally first (so a broken
-  export never gets pushed), then commit and push `export/` and `site.json`.
-- `watch/` — an optional launchd job that runs `publish.sh` automatically
-  whenever `export/` changes.
+## 1. What this is
 
-## The routine
+Kerim writes in Logseq, in a database ("DB") graph called "Kerim's Digital
+Garden." Logseq's **File → Export public pages** feature dumps the pages
+marked public as static HTML into this repo's `export/` folder. The
+**builder** — a Git submodule pointing at branch `kerim-theme` of
+[kerim/garden](https://github.com/kerim/garden) (Kerim's personal fork of
+[Arney1/garden](https://github.com/Arney1/garden)) — turns that export into a
+finished website (`dist/`). A GitHub Actions workflow builds the site and
+deploys it to the Cloudflare Pages project `garden`, publishing it at
+<https://garden.oxus.net> (also reachable at
+<https://garden-77y.pages.dev>).
 
-1. In Logseq, export the public pages into
-   `~/Code/garden-builder/export/`, replacing what's there.
-2. Either run `./publish.sh` yourself, or let the watcher (see below) do it
-   automatically a little while after the export finishes.
-3. A GitHub Actions workflow picks up the push to `main` and deploys the
-   built site to Cloudflare Pages.
+In short: **Logseq → export/ → builder → GitHub Actions → Cloudflare Pages →
+garden.oxus.net.**
 
-`publish.sh` builds locally before it commits anything, so a broken export
-never reaches the deployed site — it just fails locally with an error to fix.
+## 2. Publishing a change (the everyday routine)
 
-## For a collaborator
+1. Edit and mark pages public as usual in Logseq.
+2. In Logseq: **File → Export public pages**, and point it at
+   `~/Code/garden-builder/export` (replacing what's there).
+3. Wait about 1–2 minutes.
 
-Anyone else publishing to this garden needs:
+That's it in the normal case, because the **watcher** — a background job
+(`launchd` job `garden-builder-publish`, when installed — see section 3) —
+notices the change to `export/`, builds the site, and commits and pushes it
+automatically. You don't have to run anything yourself.
+
+To check that it worked:
+
+- Log file: `~/Library/Logs/garden-builder-publish.log` — records the
+  watcher's own actions (triggered, debounced, published, or failed).
+- GitHub Actions: the repo's Actions tab shows whether the deploy to
+  Cloudflare Pages succeeded.
+
+**Manual alternative.** If you don't want to wait for the watcher, or it
+isn't installed, run `./publish.sh` yourself from `~/Code/garden-builder`. It
+builds locally first, so a broken export fails on your machine instead of
+reaching the live site.
+
+**If the browser still shows the old page:** hard-reload it (e.g.
+`Cmd+Shift+R` in most browsers) — this is ordinary browser caching, not a
+publish failure.
+
+**Logseq export gotcha:** if the export fails with a `copyfile ENOENT`
+error, it's a stale Logseq temp file (only purged after the app has been
+running for several days). Quit and relaunch Logseq, then export again.
+
+## 3. First-time setup on a new Mac / for a collaborator
+
+Requirements: `git`, `python3` 3.10 or newer, and `node`.
+
+Clone with submodules, since the builder is a submodule and won't come along
+otherwise:
 
 ```sh
 git clone --recurse-submodules <this repo's URL>
 cd garden-builder
 ```
 
-Then follow the same routine above: drop a fresh export into `export/`, run
-`./publish.sh`. The `builder/` submodule brings in the generator automatically
-on clone; `git submodule update --init --recursive` refreshes it later if the
-generator changes upstream.
+Point Logseq's "Export public pages" at `<clone>/export` (i.e. the `export/`
+folder inside wherever you cloned this repo).
 
-## Deploying to Cloudflare Pages
+Then either:
 
-Deployment runs through GitHub Actions (`.github/workflows/deploy.yml`), not
-Cloudflare's own Git integration. Every push to `main` (and manual runs via
-`workflow_dispatch`) checks out the repo with submodules, builds with
-`./build.sh` (Python 3.12, Node 22), and uploads `dist/` directly to
-Cloudflare Pages with `wrangler pages deploy` — no Cloudflare-side build or
-Git connection is needed.
+- Run `./publish.sh` by hand each time you export, or
+- Install the watcher so it happens automatically:
 
-Set up once per repo:
+  ```sh
+  launchctl bootstrap gui/$(id -u) ~/Code/garden-builder/watch/net.oxus.garden-builder-publish.plist
+  ```
 
-1. Create a Cloudflare API token at
-   <https://dash.cloudflare.com/profile/api-tokens> using the "Edit
-   Cloudflare Workers" template (it also grants Cloudflare Pages edit
-   access).
-2. Add it, and your Cloudflare account ID, as GitHub repo secrets:
+  If your clone is **not** at `~/Code/garden-builder`, first edit the paths
+  in `watch/net.oxus.garden-builder-publish.plist` (the `ProgramArguments`
+  and `WatchPaths` entries) and `watch/garden-builder-publish` (the
+  `REPO_DIR` variable) to match your clone's location.
 
-   ```sh
-   gh secret set CLOUDFLARE_API_TOKEN
-   gh secret set CLOUDFLARE_ACCOUNT_ID
-   ```
+  To remove the watcher later:
 
-   Each prompts for the value interactively and does not echo it.
+  ```sh
+  launchctl bootout gui/$(id -u) ~/Code/garden-builder/watch/net.oxus.garden-builder-publish.plist
+  ```
 
-The first successful run creates the Cloudflare Pages project `garden`
-automatically and prints a `*.pages.dev` URL in the deploy step's output.
+A collaborator needs **write access to the GitHub repo** (so `publish.sh` can
+push). They do **not** need any Cloudflare access — deployment happens
+automatically from GitHub Actions using secrets already stored in the repo.
 
-To add a custom domain afterwards, either use the Cloudflare dashboard
-(Pages project `garden` → Custom domains) or run:
+## 4. Changing how the site looks or behaves
 
-```sh
-wrangler pages domain add <your-domain>
-```
+Most changes are **configuration**, edited in this repo's `site.json`; a
+smaller set are **code**, changed in the builder fork.
 
-The builder needs **Python 3.10+** (with venv support) and **Node.js** at
-build time — Node runs the exported KaTeX bundle and the graph layout script,
-neither of which needs `npm install`. The workflow pins Python 3.12 and
-Node 22.
+### Configuration: `site.json`
 
-## The watcher (optional, not yet installed)
+| Key | What it controls |
+| --- | --- |
+| `title` | The site's title. |
+| `home_page` | Which page is the homepage. |
+| `description` | Site description (meta tags, etc). |
+| `url` | The canonical site URL. |
+| `language` | Site language code. |
+| `navigation` | The list of top-level section pages shown in the sidebar/menu. |
+| `navigation_label` | Optional label override for a navigation entry. |
+| `url_style` | `"sections"` groups page URLs under whichever navigation entry links to them (e.g. `/technology/page/`); the default `"uuid"` gives every page a flat `/page/<slug>--<uuid>/` URL. |
+| `embed_titles` | Whether embedded pages/blocks show a title link above them (only matters when `embed_style` is `"boxed"`). |
+| `embed_style` | `"boxed"` (default) draws a box with a title around embedded pages/blocks; `"inline"` renders them as plain sub-blocks with no box, title, or bullet. |
+| `author` | Shown in the sidebar license note. |
+| `license` | License name shown in the footer/sidebar; known names like `"CC BY 4.0"` are auto-linked. |
 
-`watch/garden-builder-publish` is a small script that:
+Edit `site.json` directly in this repo, commit, and push (or let the next
+`publish.sh` run pick it up) — no submodule update needed.
 
-- debounces: Logseq's export writes many files over several seconds, so the
-  script waits 20 seconds after being triggered, then checks whether
-  `export/index.html` was modified in the last 15 seconds. If it was (export
-  still in progress), it exits without publishing — a later trigger from the
-  same export will catch it once things settle.
-- uses a `mkdir`-based lock (`.publish.lock/`) so two triggered runs can't
-  publish concurrently.
-- calls `publish.sh` and logs everything, with timestamps, to
-  `~/Library/Logs/garden-builder-publish.log`.
+### Code: the builder fork
 
-`watch/net.oxus.garden-builder-publish.plist` is the launchd job definition
-that triggers this script whenever `export/` changes (`WatchPaths`). Its
-`ProgramArguments[0]` points directly at the `garden-builder-publish` script
-(not `bash` or `sh`), so macOS shows a meaningful job name in Login Items &
-Extensions rather than a generic interpreter name.
+Anything beyond what `site.json` can control — new rendering behavior, CSS,
+new features — is a change to the generator itself, made in
+`~/Code/garden` (Kerim's fork, on branch `kerim-theme`), not in this repo.
 
-This job is **not currently loaded**. To install it:
+`kerim-theme` is stacked on top of two upstream pull requests that live on
+their own branches in the same fork: `db-embeds` (Arney1/garden #2, embeds)
+and `video-embeds` (Arney1/garden #3, video). Changes to those features
+should go on the relevant branch; everything else goes on `kerim-theme`
+directly.
 
-```sh
-launchctl bootstrap gui/$(id -u) ~/Code/garden-builder/watch/net.oxus.garden-builder-publish.plist
-```
-
-To remove it later:
+Once a change lands upstream in `kerim-theme`, pull it into this repo's
+`builder/` submodule and record the new pointer:
 
 ```sh
-launchctl bootout gui/$(id -u) ~/Code/garden-builder/watch/net.oxus.garden-builder-publish.plist
+cd builder
+git pull fork kerim-theme
+cd ..
+git add builder
+git commit -m "Update builder submodule"
+git push
 ```
 
-Logs land at `~/Library/Logs/garden-builder-publish.log`.
+## 5. Hosting
+
+The site is a **Cloudflare Pages** project named `garden`, on Cloudflare's
+free tier. Deployment is handled by `.github/workflows/deploy.yml`, which
+runs on every push to `main` (or manually via `workflow_dispatch`): it builds
+the site and uploads `dist/` with `wrangler pages deploy`. Cloudflare's own
+Git integration is not used.
+
+This needs two GitHub repo secrets:
+
+- `CLOUDFLARE_API_TOKEN` — a token created with the "Edit Cloudflare
+  Workers" template, scoped to zone `oxus.net` (this template also grants
+  Pages edit access).
+- `CLOUDFLARE_ACCOUNT_ID` — the 32-character code visible in the Cloudflare
+  dashboard's URL.
+
+`.github/workflows/domain.yml` attaches a custom domain to the Pages
+project, but it **cannot** edit DNS — the API token has no DNS permission,
+so the domain's DNS record has to be created by hand in the Cloudflare
+dashboard:
+
+- **CNAME** `garden` → `garden-77y.pages.dev`, proxied (orange cloud on).
+
+The old Netlify/Eleventy site (repo `kerim/mydatagarden`) is superseded by
+this setup and can be deleted.
+
+## 6. Local preview
+
+From this repo:
+
+```sh
+./build.sh
+python3 -m http.server 8001 --directory dist
+```
+
+Then open <http://localhost:8001> in a browser. Note: Python's preview
+server doesn't apply the security headers Cloudflare adds in production, so
+some behavior (e.g. CSP-dependent features) may differ slightly from the
+live site.
+
+## 7. Troubleshooting
+
+**The watcher didn't fire.**
+Check the log first:
+
+```sh
+tail -50 ~/Library/Logs/garden-builder-publish.log
+```
+
+Then check whether the job is actually loaded:
+
+```sh
+launchctl print gui/$(id -u)/net.oxus.garden-builder-publish
+```
+
+If it's not loaded, install it (see section 3). If it's loaded but silent,
+re-export from Logseq to re-trigger it, or just run `./publish.sh` manually.
+
+**Build warnings.**
+After a build, check `dist-report.json` (next to `dist/`, not deployed with
+the site) — it records page/attachment counts, sizes, and any warnings from
+the build.
+
+**A GitHub Actions run failed.**
+From this repo, with the `gh` CLI:
+
+```sh
+gh run list
+gh run view --log-failed
+```
+
+**The domain still resolves to the old Netlify site.**
+This is almost always DNS or caching, not the Pages deploy. Confirm the
+`garden` CNAME record in Cloudflare DNS points to `garden-77y.pages.dev`
+and is proxied (see section 5); if it was recently changed, allow time for
+DNS and browser/OS DNS caches to catch up, or test with a hard-reload or a
+different network.
