@@ -10,8 +10,11 @@ Kerim writes in Logseq, in a database ("DB") graph called "Kerim's Digital
 Garden." Logseq's **File → Export public pages** feature dumps the pages
 marked public as static HTML into this repo's `export/` folder. The
 **builder** — a Git submodule pointing at branch `kerim-theme` of
-[kerim/garden](https://github.com/kerim/garden) (Kerim's personal fork of
-[Arney1/garden](https://github.com/Arney1/garden)) — turns that export into a
+[kerim/logseq-static-garden](https://github.com/kerim/logseq-static-garden)
+(Kerim's fork of Arney's
+[Arney1/logseq-static-garden](https://github.com/Arney1/logseq-static-garden),
+the exporter Arney split out of their personal garden in September 2026) —
+turns that export into a
 finished website (`dist/`). A GitHub Actions workflow builds the site and
 deploys it to the Cloudflare Pages project `garden`, publishing it at
 <https://garden.oxus.net> (also reachable at
@@ -120,20 +123,37 @@ Edit `site.json` directly in this repo, commit, and push (or let the next
 
 Anything beyond what `site.json` can control — new rendering behavior, CSS,
 new features — is a change to the generator itself, made in
-`~/Code/garden` (Kerim's fork, on branch `kerim-theme`), not in this repo.
+`~/Code/logseq-static-garden` (Kerim's fork, on branch `kerim-theme`), not in
+this repo. In that clone, `origin` is Kerim's fork and `upstream` is Arney's
+`Arney1/logseq-static-garden`.
 
-`kerim-theme` is stacked on top of two upstream pull requests that live on
-their own branches in the same fork: `db-embeds` (Arney1/garden #2, embeds)
-and `video-embeds` (Arney1/garden #3, video). Changes to those features
-should go on the relevant branch; everything else goes on `kerim-theme`
-directly.
+Where a change goes:
 
-Once a change lands upstream in `kerim-theme`, pull it into this repo's
-`builder/` submodule and record the new pointer:
+- **Fixes any garden would want** (renderer bugs, new media types): cut a
+  branch from `upstream/main`, test it there, and send it to Arney as a pull
+  request against `Arney1/logseq-static-garden`. Then merge that branch into
+  `kerim-theme` so this site gets it without waiting.
+- **Kerim's own look and options** (the Red Graphite theme, `url_style`,
+  `navigation_page`, and similar): commit directly on `kerim-theme`.
+
+To bring in Arney's latest changes, merge them into `kerim-theme` (merge, not
+rebase — sites record exact commits of this branch):
+
+```sh
+cd ~/Code/logseq-static-garden
+git fetch upstream
+git checkout kerim-theme
+git merge upstream/main
+git push
+```
+
+Run the tests and a full build of this site before recording the new pointer.
+Once a change is on `kerim-theme`, pull it into this repo's `builder/`
+submodule and record the new pointer:
 
 ```sh
 cd builder
-git pull fork kerim-theme
+git pull origin kerim-theme
 cd ..
 git add builder
 git commit -m "Update builder submodule"
