@@ -10,5 +10,6 @@
   "embed_titles": false,
   "embed_style": "inline",
   "author": "P. Kerim Friedman",
-  "license": "CC BY 4.0"
+  "license": "CC BY 4.0",
+  "theme_css": "theme.css"
 }
