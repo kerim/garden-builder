@@ -1,0 +1,176 @@
+name: Attach custom domain
+
+on:
+  workflow_dispatch:
+    inputs:
+      domain:
+        description: "Custom domain to attach to the Pages project"
+        required: true
+        default: garden.oxus.net
+
+permissions:
+  contents: read
+
+jobs:
+  attach-domain:
+    runs-on: ubuntu-latest
+    name: Attach domain to Pages project
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      DOMAIN: ${{ inputs.domain }}
+    steps:
+      - name: Add domain to Pages project
+        run: |
+          set -euo pipefail
+          echo "Attaching domain: $DOMAIN"
+
+          resp=$(curl -sS -X POST \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/pages/projects/garden/domains" \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            -H "Content-Type: application/json" \
+            --data "{\"name\": \"${DOMAIN}\"}")
+
+          success=$(echo "$resp" | jq -r '.success')
+          if [ "$success" != "true" ]; then
+            already_exists=$(echo "$resp" | jq -r '[.errors[]?.message] | any(test("already exists"; "i"))')
+            if [ "$already_exists" = "true" ]; then
+              echo "Domain already exists on the Pages project — treating as success."
+            else
+              echo "Failed to add domain to Pages project:"
+              echo "$resp" | jq .
+              exit 1
+            fi
+          else
+            echo "Domain add response:"
+            echo "$resp" | jq .
+          fi
+
+      - name: List Pages domains and print status
+        run: |
+          set -euo pipefail
+          resp=$(curl -sS -X GET \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/pages/projects/garden/domains" \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            -H "Content-Type: application/json")
+
+          echo "Full domains list:"
+          echo "$resp" | jq .
+
+          echo "Status for ${DOMAIN}:"
+          echo "$resp" | jq --arg d "$DOMAIN" '.result[] | select(.name == $d)'
+
+      - name: Look up zone id for oxus.net
+        id: zone
+        run: |
+          set -euo pipefail
+          resp=$(curl -sS -X GET \
+            "https://api.cloudflare.com/client/v4/zones?name=oxus.net" \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            -H "Content-Type: application/json")
+
+          success=$(echo "$resp" | jq -r '.success')
+          if [ "$success" != "true" ]; then
+            echo "Could not look up zone for oxus.net:"
+            echo "$resp" | jq .
+            errcode=$(echo "$resp" | jq -r '[.errors[]?.code] | join(",")')
+            if echo "$resp" | jq -e '[.errors[]?.message] | any(test("authentication|authorization|permission"; "i"))' >/dev/null; then
+              echo "dns_permission_denied=true" >> "$GITHUB_OUTPUT"
+              echo "The Cloudflare API token does not have permission to read zones/DNS."
+              echo "Please set the DNS record manually in the Cloudflare DNS page:"
+              echo "  CNAME ${DOMAIN} -> garden-77y.pages.dev (proxied)"
+              exit 0
+            fi
+            exit 1
+          fi
+
+          zone_id=$(echo "$resp" | jq -r '.result[0].id // empty')
+          if [ -z "$zone_id" ]; then
+            echo "Zone oxus.net not found in this account."
+            echo "dns_permission_denied=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "zone_id=$zone_id" >> "$GITHUB_OUTPUT"
+          echo "Found zone id for oxus.net"
+
+      - name: Update or create DNS record
+        if: steps.zone.outputs.zone_id != ''
+        run: |
+          set -euo pipefail
+          zone_id="${{ steps.zone.outputs.zone_id }}"
+          target="garden-77y.pages.dev"
+
+          list_resp=$(curl -sS -X GET \
+            "https://api.cloudflare.com/client/v4/zones/${zone_id}/dns_records?name=${DOMAIN}" \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            -H "Content-Type: application/json")
+
+          success=$(echo "$list_resp" | jq -r '.success')
+          if [ "$success" != "true" ]; then
+            if echo "$list_resp" | jq -e '[.errors[]?.message] | any(test("authentication|authorization|permission"; "i"))' >/dev/null; then
+              echo "The Cloudflare API token does not have permission to read/edit DNS records."
+              echo "Please set the DNS record manually in the Cloudflare DNS page:"
+              echo "  CNAME ${DOMAIN} -> ${target} (proxied)"
+              echo "$list_resp" | jq .
+              exit 0
+            fi
+            echo "Failed to list DNS records:"
+            echo "$list_resp" | jq .
+            exit 1
+          fi
+
+          record_id=$(echo "$list_resp" | jq -r '.result[0].id // empty')
+          payload=$(jq -n --arg name "$DOMAIN" --arg content "$target" \
+            '{type: "CNAME", name: $name, content: $content, proxied: true}')
+
+          if [ -n "$record_id" ]; then
+            echo "Existing DNS record found (id: ${record_id}), updating via PATCH."
+            update_resp=$(curl -sS -X PATCH \
+              "https://api.cloudflare.com/client/v4/zones/${zone_id}/dns_records/${record_id}" \
+              -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+              -H "Content-Type: application/json" \
+              --data "$payload")
+          else
+            echo "No existing DNS record found, creating via POST."
+            update_resp=$(curl -sS -X POST \
+              "https://api.cloudflare.com/client/v4/zones/${zone_id}/dns_records" \
+              -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+              -H "Content-Type: application/json" \
+              --data "$payload")
+          fi
+
+          update_success=$(echo "$update_resp" | jq -r '.success')
+          if [ "$update_success" != "true" ]; then
+            if echo "$update_resp" | jq -e '[.errors[]?.message] | any(test("authentication|authorization|permission"; "i"))' >/dev/null; then
+              echo "The Cloudflare API token does not have permission to edit DNS records."
+              echo "Please set the DNS record manually in the Cloudflare DNS page:"
+              echo "  CNAME ${DOMAIN} -> ${target} (proxied)"
+              echo "$update_resp" | jq .
+              exit 0
+            fi
+            echo "Failed to update/create DNS record:"
+            echo "$update_resp" | jq .
+            exit 1
+          fi
+
+          echo "DNS record update response:"
+          echo "$update_resp" | jq .
+
+      - name: Print final DNS record state
+        if: always()
+        run: |
+          set -euo pipefail
+          zone_id="${{ steps.zone.outputs.zone_id }}"
+          if [ -z "$zone_id" ]; then
+            echo "No zone id available (DNS lookup was skipped or denied) — nothing further to print."
+            exit 0
+          fi
+
+          final_resp=$(curl -sS -X GET \
+            "https://api.cloudflare.com/client/v4/zones/${zone_id}/dns_records?name=${DOMAIN}" \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            -H "Content-Type: application/json")
+
+          echo "Final DNS record state for ${DOMAIN}:"
+          echo "$final_resp" | jq '.result'
