@@ -28,7 +28,8 @@ config, and a pointer to the builder tooling — not the tooling itself.
    `~/Code/garden-builder/export/`, replacing what's there.
 2. Either run `./publish.sh` yourself, or let the watcher (see below) do it
    automatically a little while after the export finishes.
-3. Cloudflare Pages picks up the push and rebuilds the live site.
+3. A GitHub Actions workflow picks up the push to `main` and deploys the
+   built site to Cloudflare Pages.
 
 `publish.sh` builds locally before it commits anything, so a broken export
 never reaches the deployed site — it just fails locally with an error to fix.
@@ -47,28 +48,44 @@ Then follow the same routine above: drop a fresh export into `export/`, run
 on clone; `git submodule update --init --recursive` refreshes it later if the
 generator changes upstream.
 
-## Cloudflare Pages settings
+## Deploying to Cloudflare Pages
 
-Per the builder's own docs (`builder/static-garden/README.md`):
+Deployment runs through GitHub Actions (`.github/workflows/deploy.yml`), not
+Cloudflare's own Git integration. Every push to `main` (and manual runs via
+`workflow_dispatch`) checks out the repo with submodules, builds with
+`./build.sh` (Python 3.12, Node 22), and uploads `dist/` directly to
+Cloudflare Pages with `wrangler pages deploy` — no Cloudflare-side build or
+Git connection is needed.
 
-- **Build command:** `./build.sh`
-- **Output directory:** `dist`
-- **Framework preset:** None
-- **Root directory:** repository root
+Set up once per repo:
+
+1. Create a Cloudflare API token at
+   <https://dash.cloudflare.com/profile/api-tokens> using the "Edit
+   Cloudflare Workers" template (it also grants Cloudflare Pages edit
+   access).
+2. Add it, and your Cloudflare account ID, as GitHub repo secrets:
+
+   ```sh
+   gh secret set CLOUDFLARE_API_TOKEN
+   gh secret set CLOUDFLARE_ACCOUNT_ID
+   ```
+
+   Each prompts for the value interactively and does not echo it.
+
+The first successful run creates the Cloudflare Pages project `garden`
+automatically and prints a `*.pages.dev` URL in the deploy step's output.
+
+To add a custom domain afterwards, either use the Cloudflare dashboard
+(Pages project `garden` → Custom domains) or run:
+
+```sh
+wrangler pages domain add <your-domain>
+```
 
 The builder needs **Python 3.10+** (with venv support) and **Node.js** at
 build time — Node runs the exported KaTeX bundle and the graph layout script,
-neither of which needs `npm install`. If Cloudflare Pages doesn't already
-have suitable versions on its default image, set these build environment
-variables to pin them (adjust to whatever versions are actually available on
-Cloudflare's image list):
-
-- `PYTHON_VERSION` — e.g. `3.11`
-- `NODE_VERSION` — e.g. `20`
-
-Cloudflare needs to be able to clone the `builder` submodule, which means the
-`kerim-theme` branch must exist on `https://github.com/kerim/garden.git`
-(the fork) before the first Cloudflare build — see "What remains" below.
+neither of which needs `npm install`. The workflow pins Python 3.12 and
+Node 22.
 
 ## The watcher (optional, not yet installed)
 
