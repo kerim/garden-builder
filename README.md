@@ -76,18 +76,23 @@ Then either:
 - Install the watcher so it happens automatically:
 
   ```sh
-  launchctl bootstrap gui/$(id -u) ~/Code/garden-builder/watch/net.oxus.garden-builder-publish.plist
+  ~/Code/garden-builder/watch/install.sh
   ```
 
-  If your clone is **not** at `~/Code/garden-builder`, first edit the paths
-  in `watch/net.oxus.garden-builder-publish.plist` (the `ProgramArguments`
-  and `WatchPaths` entries) and `watch/garden-builder-publish` (the
-  `REPO_DIR` variable) to match your clone's location.
+  It compiles a small launcher (needs `clang`, from the Xcode Command Line
+  Tools), links the job into `~/Library/LaunchAgents` so it survives
+  restarts, and loads it. Re-run it after changing anything in `watch/`.
+
+  If your clone is **not** at `~/Code/garden-builder`, first edit the paths in
+  `watch/net.oxus.garden-builder-publish.plist` (the `ProgramArguments` and
+  `WatchPaths` entries) and `watch/garden-builder-publish.sh` (the `REPO_DIR`
+  variable) to match your clone's location.
 
   To remove the watcher later:
 
   ```sh
-  launchctl bootout gui/$(id -u) ~/Code/garden-builder/watch/net.oxus.garden-builder-publish.plist
+  launchctl bootout gui/$(id -u)/net.oxus.garden-builder-publish
+  rm ~/Library/LaunchAgents/net.oxus.garden-builder-publish.plist
   ```
 
 A collaborator needs **write access to the GitHub repo** (so `publish.sh` can
